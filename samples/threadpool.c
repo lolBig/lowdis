@@ -10,7 +10,7 @@ int main()
 {
   threadpool_init(4);
   for (int i = 0; i < 8; ++i) {
-    threadpool_append_task(thread_test, (void *)i);
+    threadpool_post_task(thread_test, (void *)i);
   }
 
   LOG_ERROR("done");

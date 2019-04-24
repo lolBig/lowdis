@@ -12,3 +12,5 @@ add_executable(lowdis ${SRC_LIST})
 add_executable(threadpool ./samples/threadpool.c ./src/threadpool.c ./src/logger.c)
 
 add_executable(sock-client ./samples/sock.c)
+
+add_executable(snip ./samples/snip.c)

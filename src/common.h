@@ -19,9 +19,9 @@
 #include "logger.h"
 
 #define ASSERT(exp, ...) \
-  do { if (!(exp)) { fprintf(stderr, ##__VA_ARGS__); assert(0); } } while (0)
+  do { if (!(exp)) { LOG_FATAL(__VA_ARGS__); assert(0); } } while (0)
 
 #define SASSERT(exp) \
-  do { if (!(exp)) { fprintf(stderr, "%s", strerror(errno)); assert(0); } } while (0)
+  do { if (!(exp)) { LOG_FATAL("%s", strerror(errno)); assert(0); } } while (0)
 
 #endif //LOWDIS_COMMON_H
