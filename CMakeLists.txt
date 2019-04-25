@@ -7,10 +7,16 @@ include_directories(src)
 
 aux_source_directory(src SRC_LIST)
 
-add_executable(lowdis ${SRC_LIST})
+add_library(lowdis ${SRC_LIST})
 
-add_executable(threadpool ./samples/threadpool.c ./src/threadpool.c ./src/logger.c)
+add_executable(sock-svr ./samples/sock-svr.c)
+target_link_libraries(sock-svr lowdis)
 
-add_executable(sock-client ./samples/sock.c)
+add_executable(threadpool ./samples/threadpool.c)
+target_link_libraries(threadpool lowdis)
+
+add_executable(sock-cli ./samples/sock-cli.c)
+target_link_libraries(sock-cli lowdis)
 
 add_executable(snip ./samples/snip.c)
+target_link_libraries(snip lowdis)

@@ -5,8 +5,8 @@
 
 typedef void (*threadpool_func)(void *data);
 
-extern void threadpool_init(int size);
+void threadpool_init(int size);
 
-extern void threadpool_post_task(threadpool_func func, void *data);
+void threadpool_post_task(threadpool_func func, void *data);
 
 #endif 

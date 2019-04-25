@@ -40,18 +40,17 @@ static void* threadpool_run_task(void *data) {
   pthread_mutex_lock(&task_lock);
   while (true) {
     if (task == NULL) {
-      LOG_INFO("%d waiting task", runner->id);
       pthread_cond_wait(&task_cond, &task_lock);
       if (task_state == STOPPED) {
         pthread_mutex_unlock(&task_lock);
         break;
       }
       NEW_TASK;
-      if (task == NULL) {
-        continue;
-      }
     }
     pthread_mutex_unlock(&task_lock);
+    if (task == NULL) {
+      continue;
+    }
     task->func(task->func_data);
     free(task);
     task = NULL;
@@ -60,7 +59,6 @@ static void* threadpool_run_task(void *data) {
   }
   free(runner);
   pthread_exit(NULL);
-  return NULL;
 }
 
 #undef NEW_TASK

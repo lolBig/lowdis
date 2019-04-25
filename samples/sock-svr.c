@@ -1,22 +1,30 @@
 #include "threadpool.h"
 
-void *on_new_client(void *data)
-{
+void on_new_client(void *data) {
   int cli_sock = *(int*)data;
   LOG_INFO("new client");
-  char buffer[40];
+  char buffer[10];
+  int r;
   while (true) {
-    int r = read(cli_sock, buffer, sizeof(buffer));
-    LOG_INFO("client message: %s, %d", buffer, r);
-    write(cli_sock, buffer, r);
+    r = recv(cli_sock, buffer, sizeof(buffer), 0);
+    if (r == 0) {
+      LOG_INFO("client closed");
+      break;
+    } else if (r < 0) {
+      LOG_SERROR;
+      break;
+    } else {
+      LOG_INFO("client message: %s, %d", buffer, r);
+      buffer[r] = '\0';
+      send(cli_sock, buffer, r, 0);
+    }
   }
   close(cli_sock);
   free(data);
-  pthread_exit(0);
 }
 
-int main(int argc, char **argv)
-{
+int main(int argc, char **argv) {
+  threadpool_init(4);
   int serv_sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
   ASSERT(serv_sock > 0, "create socket error %d", serv_sock);
   int reuse = 1;
@@ -31,13 +39,10 @@ int main(int argc, char **argv)
 
   struct sockaddr_in cli_addr;
   socklen_t cli_len = sizeof(cli_addr);
-  while (1)
-  {
+  while (true) {
     int *cli_sock = (int*) malloc(sizeof(int));
     *cli_sock = accept(serv_sock, (struct sockaddr *)&cli_addr, &cli_len);
-    pthread_t pid;
-    pthread_create(&pid, NULL, on_new_client, cli_sock);
-    pthread_detach(pid);
+    threadpool_post_task(on_new_client, cli_sock);
   }
   close(serv_sock);
 
