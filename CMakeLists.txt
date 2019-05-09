@@ -9,8 +9,11 @@ aux_source_directory(src SRC_LIST)
 
 add_library(lowdis ${SRC_LIST})
 
-add_executable(sock-svr ./samples/sock-svr.c)
-target_link_libraries(sock-svr lowdis)
+add_executable(sock-svr-thread ./samples/sock-svr-thread.c)
+target_link_libraries(sock-svr-thread lowdis)
+
+add_executable(sock-svr-reactor ./samples/sock-svr-reactor.c)
+target_link_libraries(sock-svr-reactor lowdis)
 
 add_executable(threadpool ./samples/threadpool.c)
 target_link_libraries(threadpool lowdis)
