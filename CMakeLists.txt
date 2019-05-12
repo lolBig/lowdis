@@ -8,6 +8,7 @@ include_directories(src)
 aux_source_directory(src SRC_LIST)
 
 add_library(lowdis ${SRC_LIST})
+target_link_libraries(lowdis pthread)
 
 add_executable(sock-svr-thread ./samples/sock-svr-thread.c)
 target_link_libraries(sock-svr-thread lowdis)
