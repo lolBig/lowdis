@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 2.8)
 project(lowdis)
 
-set(CMAKE_C_FLAGS "${CMAKE_FLAGS} -Wall -g")
+set(CMAKE_C_FLAGS "${CMAKE_FLAGS} -Wall -g -std=c99")
 
 include_directories(src)
 

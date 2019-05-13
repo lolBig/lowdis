@@ -26,4 +26,6 @@
 
 #define LOG_SERROR do { LOG_ERROR("%s", strerror(errno)); } while (0)
 
+#define ERR_STR strerror(errno)
+
 #endif //LOWDIS_COMMON_H
