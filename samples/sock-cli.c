@@ -40,7 +40,6 @@ void process(void *data) {
   while (1) {
     number = epoll_wait(epoll_fd, events, MAX_EVENTS, -1);
     SASSERT(number > 0);
-    LOG_INFO("events count %d", number);
     for (int i = 0; i < number; ++i) {
       int new_fd = events[i].data.fd;
       if (events[i].events & EPOLLIN) {
@@ -62,7 +61,7 @@ void process(void *data) {
           return;
         }
         if (new_fd == sync_fd) {
-          LOG_INFO("sending input ...");
+          LOG_INFO("sending %ld bytes", input_buf_size);
           send(sock, input_buf, input_buf_size, 0);
         } else {
           buffer[r] = '\0';
@@ -89,7 +88,6 @@ int main() {
       break;
     }
     input_buf_size = strlen(input_buf);
-    LOG_INFO("sending %ld bytes", input_buf_size);
     SASSERT(write(sync_fd, &input_buf_size, 8) == 8);
   }
   SASSERT(close(sync_fd) == 0);
