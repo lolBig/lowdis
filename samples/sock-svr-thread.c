@@ -1,9 +1,11 @@
 #include "threadpool.h"
 
+#define BUF_SIZE 5
+
 void on_new_client(void *data) {
   int cli_sock = *(int*)data;
   LOG_INFO("new client");
-  char buffer[10];
+  char buffer[BUF_SIZE];
   int r;
   while (true) {
     r = recv(cli_sock, buffer, sizeof(buffer), 0);
