@@ -26,14 +26,14 @@ static void set_epoll_event(int fd, int events, int flag) {
 static void connect_server(void *data) {
   int r;
   int sock = socket(AF_INET, SOCK_STREAM, 0);
-  struct sockaddr_in serv_addr;
-  memset(&serv_addr, 0, sizeof(serv_addr));
-  serv_addr.sin_family = AF_INET;
-  serv_addr.sin_addr.s_addr = inet_addr(SVR_ADDR);
-  serv_addr.sin_port = htons(SVR_PORT);
+  struct sockaddr_in addr;
+  memset(&addr, 0, sizeof(addr));
+  addr.sin_family = AF_INET;
+  addr.sin_addr.s_addr = inet_addr(SVR_ADDR);
+  addr.sin_port = htons(SVR_PORT);
   int old_flags = fcntl(sock, F_GETFL);
   SASSERT(fcntl(sock, F_SETFL, old_flags | O_NONBLOCK) != -1);
-  r = connect(sock, (struct sockaddr *)&serv_addr, sizeof(serv_addr));
+  r = connect(sock, (struct sockaddr *)&addr, sizeof(addr));
   if (r == 0) {
     is_connected = true;
   } else {
@@ -94,7 +94,7 @@ static void connect_server(void *data) {
         } else {
           is_connected = true;
           set_epoll_event(fd, EPOLLIN, EPOLL_CTL_MOD);
-          LOG_INFO("connected to server");
+          LOG_INFO("connected to server, port %d", htons(addr.sin_port));
         }
       } else if (events[i].events & EPOLLERR) {
         SASSERT(0, "epoll error");

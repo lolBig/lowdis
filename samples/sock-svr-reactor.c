@@ -9,13 +9,17 @@
 #define LISTEN_ADDR "127.0.0.1"
 #define CONN_MAX 5
 
-typedef void (*epoll_event_handler)(struct epoll_event *event);
+typedef void (*epoll_event_handler)(struct epoll_event *);
+typedef void (*epoll_accept_handler)(struct epoll_event *,
+  struct sockaddr_in *, socklen_t *);
 
 static int epoll_type = EPOLLET;
 static int block_type = O_NONBLOCK;
 static int epoll_fd;
 static int serv_fd;
+static epoll_accept_handler handle_connection;
 static epoll_event_handler handle_cli_event;
+static int cli_count = 0;
 
 typedef struct {
   char ip[INET_ADDRSTRLEN];
@@ -37,8 +41,10 @@ static addr_info_t* get_addr_info(int fd, struct sockaddr_in *addr) {
 static void addfd_to_epoll(struct epoll_event *event, int fd, struct sockaddr_in *addr) {
   event->events = EPOLLIN | epoll_type;
   event->data.ptr = get_addr_info(fd, addr);
-  int old_flags = fcntl(fd, F_GETFL);
-  SASSERT(fcntl(fd, F_SETFL, old_flags | block_type) != -1);
+  if (block_type == O_NONBLOCK) {
+    int old_flags = fcntl(fd, F_GETFL);
+    SASSERT(fcntl(fd, F_SETFL, old_flags | block_type) != -1);
+  }
   SASSERT(epoll_ctl(epoll_fd, EPOLL_CTL_ADD, fd, event) != -1);
 }
 
@@ -46,7 +52,8 @@ static void removefd_from_epoll(struct epoll_event *event) {
   addr_info_t *info = event->data.ptr;
   SASSERT(epoll_ctl(epoll_fd, EPOLL_CTL_DEL, info->fd, event) == 0);
   SASSERT(close(info->fd) == 0);
-  LOG_INFO("client %s:%d closed", info->ip, info->port);
+  --cli_count;
+  LOG_INFO("client %s:%d closed, total %d", info->ip, info->port, cli_count);
   free(info);
 }
 
@@ -71,15 +78,14 @@ static void process_in_lt(struct epoll_event *event) {
   }
 }
 
-static void process_in_et_loop(struct epoll_event *event) {
+static void process_in_et(struct epoll_event *event) {
   addr_info_t *cli_info = (addr_info_t *)event->data.ptr;
   char buffer[BUF_SIZE];
   int r;
   while (true) {
     r = read(cli_info->fd, buffer, sizeof(buffer) - 1);
     if (r == 0) {
-      LOG_INFO("client closed");
-      close(cli_info->fd);
+      removefd_from_epoll(event);
       break;
     } else if (r < 0) {
       int err = errno;
@@ -88,7 +94,7 @@ static void process_in_et_loop(struct epoll_event *event) {
       }
       const char *errstr = strerror(errno);
       LOG_ERROR("read %s:%d error: %s", cli_info->ip, cli_info->port, errstr);
-      SASSERT(close(cli_info->fd) == 0);
+      removefd_from_epoll(event);
       break;
     } else {
       LOG_INFO("client message: %s, %d", buffer, r);
@@ -98,12 +104,50 @@ static void process_in_et_loop(struct epoll_event *event) {
   }
 }
 
+static void process_accept_lt(struct epoll_event *event,
+  struct sockaddr_in *cli_addr, socklen_t *cli_len) {
+  int cli_fd = accept(serv_fd, (struct sockaddr *)cli_addr, cli_len);
+  SASSERT(cli_fd > 0);
+  addfd_to_epoll(event, cli_fd, cli_addr);
+  addr_info_t *cli_info = (addr_info_t *)event->data.ptr;
+  ++cli_count;
+  LOG_INFO("new lt client: %s:%d, total %d", cli_info->ip, cli_info->port, cli_count);
+}
+
+static void process_accept_et(struct epoll_event *event,
+  struct sockaddr_in *cli_addr, socklen_t *cli_len) {
+  int cli_fd;
+  while (1) {
+    cli_fd = accept(serv_fd, (struct sockaddr *)cli_addr, cli_len);
+    if (cli_fd == -1) {
+      int err = errno;
+      if (err != EAGAIN && err != EINTR) {
+        LOG_ERROR("accept error: %d, %s", err, strerror(err));
+      }
+      break;
+    }
+    addfd_to_epoll(event, cli_fd, cli_addr);
+    addr_info_t *cli_info = (addr_info_t *)event->data.ptr;
+    ++cli_count;
+    LOG_INFO("new et client: %s:%d, total %d", cli_info->ip, cli_info->port, cli_count);
+  }
+}
+
 int main(int argc, char **argv) {
   LOG_INFO("starting process ...");
   if (epoll_type == EPOLLET) {
-    handle_cli_event = process_in_et_loop;
+    handle_cli_event = process_in_et;
+    handle_connection = process_accept_et;
+    LOG_INFO("et trigger");
   } else {
     handle_cli_event = process_in_lt;
+    handle_connection = process_accept_lt;
+    LOG_INFO("lt trigger");
+  }
+  if (block_type == O_NONBLOCK) {
+    LOG_INFO("NONBLOCK mode");
+  } else {
+    LOG_INFO("BLOCK mode");
   }
 
   int reuse = 1;
@@ -135,11 +179,7 @@ int main(int argc, char **argv) {
     for (int i = 0; i < number; ++i) {
       if (events[i].events & EPOLLIN) {
         if (((addr_info_t *)events[i].data.ptr)->fd == serv_fd) {
-          int cli_fd = accept(serv_fd, (struct sockaddr *)&cli_addr, &cli_len);
-          SASSERT(cli_fd > 0);
-          addfd_to_epoll(&events[i], cli_fd, &cli_addr);
-          addr_info_t *cli_info = (addr_info_t *)events[i].data.ptr;
-          LOG_INFO("new client connection: %s:%d", cli_info->ip, cli_info->port);
+          handle_connection(&events[i], &cli_addr, &cli_len);
         } else {
           handle_cli_event(&events[i]);
         }
