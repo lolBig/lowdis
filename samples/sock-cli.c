@@ -6,22 +6,25 @@
 
 #define MAX_EVENTS 10
 #define BUF_SIZE 8
+#define INPUT_BUF_SIZE 1024
 #define SVR_PORT 12306
 #define SVR_ADDR "127.0.0.1"
 
 static int epoll_fd;
 static int sync_fd;
-static char input_buf[1024];
+static char input_buf[INPUT_BUF_SIZE];
 static uint64_t input_buf_size;
+static bool is_connected = false;
 
-void addfd_to_epoll(int epoll_fd, int fd) {
+static void set_epoll_event(int fd, int events, int flag) {
   struct epoll_event ep_event;
   ep_event.data.fd = fd;
-  ep_event.events = EPOLLIN;
-  SASSERT(epoll_ctl(epoll_fd, EPOLL_CTL_ADD, fd, &ep_event) != -1);
+  ep_event.events = events;
+  SASSERT(epoll_ctl(epoll_fd, flag, fd, &ep_event) != -1);
 }
 
-void process(void *data) {
+static void connect_server(void *data) {
+  int r;
   int sock = socket(AF_INET, SOCK_STREAM, 0);
   struct sockaddr_in serv_addr;
   memset(&serv_addr, 0, sizeof(serv_addr));
@@ -30,18 +33,26 @@ void process(void *data) {
   serv_addr.sin_port = htons(SVR_PORT);
   int old_flags = fcntl(sock, F_GETFL);
   SASSERT(fcntl(sock, F_SETFL, old_flags | O_NONBLOCK) != -1);
-  connect(sock, (struct sockaddr *)&serv_addr, sizeof(serv_addr));
+  r = connect(sock, (struct sockaddr *)&serv_addr, sizeof(serv_addr));
+  if (r == 0) {
+    is_connected = true;
+  } else {
+    SASSERT(errno == EINPROGRESS);
+  }
   char buffer[BUF_SIZE];
 
   struct epoll_event events[MAX_EVENTS];
-  addfd_to_epoll(epoll_fd, sock);
+  set_epoll_event(sock, EPOLLOUT | EPOLLIN, EPOLL_CTL_ADD);
 
   int number;
   while (1) {
     number = epoll_wait(epoll_fd, events, MAX_EVENTS, -1);
-    SASSERT(number > 0);
+    if (number == 0) {
+      SASSERT(errno == EINTR);
+      continue;
+    }
     for (int i = 0; i < number; ++i) {
-      int new_fd = events[i].data.fd;
+      int fd = events[i].data.fd;
       if (events[i].events & EPOLLIN) {
         int r = read(events[i].data.fd, buffer, sizeof(buffer));
         if (r == 0) {
@@ -60,15 +71,35 @@ void process(void *data) {
           exit(0);
           return;
         }
-        if (new_fd == sync_fd) {
+        if (fd == sync_fd) {
           LOG_INFO("sending %ld bytes", input_buf_size);
           send(sock, input_buf, input_buf_size, 0);
         } else {
           buffer[r] = '\0';
-          LOG_INFO("Message form server: %s, %d", buffer, r);
+          LOG_INFO("message form server: %s, %d", buffer, r);
         }
+      } else if (events[i].events & EPOLLOUT) {
+        if (fd == sync_fd) {
+          continue;
+        }
+        int err;
+        socklen_t err_size = sizeof(err);
+        SASSERT(getsockopt(fd, SOL_SOCKET, SO_ERROR, &err, &err_size) == 0);
+        if (err) {
+          err = errno;
+          LOG_ERROR("connect error: %d %s", err, strerror(err));
+          set_epoll_event(fd, 0, EPOLL_CTL_DEL);
+          SASSERT(close(fd));
+          exit(0);
+        } else {
+          is_connected = true;
+          set_epoll_event(fd, EPOLLIN, EPOLL_CTL_MOD);
+          LOG_INFO("connected to server");
+        }
+      } else if (events[i].events & EPOLLERR) {
+        SASSERT(0, "epoll error");
       } else {
-        SASSERT("new event");
+        SASSERT(0, "unhandled epoll event");
       }
     }
   }
@@ -79,12 +110,16 @@ int main() {
 
   SASSERT((epoll_fd = epoll_create1(0)) > 0);
   SASSERT((sync_fd = eventfd(0, EFD_NONBLOCK)) > 0);
-  addfd_to_epoll(epoll_fd, sync_fd);
+  set_epoll_event(sync_fd, EPOLLIN, EPOLL_CTL_ADD);
 
   threadpool_init(4);
-  threadpool_post_task(process, NULL);
+  threadpool_post_task(connect_server, NULL);
 
   while (scanf("%s", input_buf) != EOF) {
+    if (!is_connected) {
+      LOG_ERROR("server is not connected yet");
+      continue;
+    }
     input_buf_size = strlen(input_buf);
     SASSERT(write(sync_fd, &input_buf_size, 8) == 8);
   }

@@ -9,10 +9,13 @@
 #define LISTEN_ADDR "127.0.0.1"
 #define CONN_MAX 5
 
-static int epoll_type = 0;
+typedef void (*epoll_event_handler)(struct epoll_event *event);
+
+static int epoll_type = EPOLLET;
 static int block_type = O_NONBLOCK;
 static int epoll_fd;
 static int serv_fd;
+static epoll_event_handler handle_cli_event;
 
 typedef struct {
   char ip[INET_ADDRSTRLEN];
@@ -41,7 +44,7 @@ static void addfd_to_epoll(struct epoll_event *event, int fd, struct sockaddr_in
 
 static void removefd_from_epoll(struct epoll_event *event) {
   addr_info_t *info = event->data.ptr;
-  SASSERT(epoll_ctl(epoll_fd, EPOLL_CTL_DEL, info->fd, event) != -1);
+  SASSERT(epoll_ctl(epoll_fd, EPOLL_CTL_DEL, info->fd, event) == 0);
   SASSERT(close(info->fd) == 0);
   LOG_INFO("client %s:%d closed", info->ip, info->port);
   free(info);
@@ -52,18 +55,19 @@ static void process_in_lt(struct epoll_event *event) {
   char buffer[BUF_SIZE];
   int r;
   memset(buffer, 0, BUF_SIZE);
-  LOG_INFO("%s:%d", cli_info->ip, cli_info->port);
-  r = recv(cli_info->fd, buffer, BUF_SIZE, 0);
+  r = read(cli_info->fd, buffer, BUF_SIZE);
   if (r > 0) {
     LOG_INFO("client message: %s, %d", buffer, r);
     buffer[r] = '\0';
-    SASSERT((r = send(cli_info->fd, buffer, r, 0)) > 0);
+    SASSERT((r = write(cli_info->fd, buffer, r)) > 0);
     LOG_INFO("response %d bytes", r);
   } else {
     if (r < 0) {
-      LOG_SERROR;
+      int err = errno;
+      LOG_ERROR("code: %d, message: %s", err, strerror(err));
     }
     removefd_from_epoll(event);
+    SASSERT(close(cli_info->fd) == 0);
   }
 }
 
@@ -72,78 +76,81 @@ static void process_in_et_loop(struct epoll_event *event) {
   char buffer[BUF_SIZE];
   int r;
   while (true) {
-    r = recv(cli_info->fd, buffer, sizeof(buffer), 0);
+    r = read(cli_info->fd, buffer, sizeof(buffer) - 1);
     if (r == 0) {
       LOG_INFO("client closed");
       close(cli_info->fd);
       break;
     } else if (r < 0) {
-      LOG_SERROR;
-      close(cli_info->fd);
+      int err = errno;
+      if (err == EAGAIN || err == EINTR) {
+        break;
+      }
+      const char *errstr = strerror(errno);
+      LOG_ERROR("read %s:%d error: %s", cli_info->ip, cli_info->port, errstr);
+      SASSERT(close(cli_info->fd) == 0);
       break;
     } else {
       LOG_INFO("client message: %s, %d", buffer, r);
       buffer[r] = '\0';
-      send(cli_info->fd, buffer, r, 0);
+      SASSERT(write(cli_info->fd, buffer, r) == r);
     }
   }
-}
-
-static void process(struct epoll_event *events, int number) {
-  struct sockaddr_in cli_addr;
-  socklen_t cli_len = sizeof(struct sockaddr_in);
-  for (int i = 0; i < number; ++i) {
-    if (events[i].events & EPOLLIN) {
-      if (((addr_info_t *)events[i].data.ptr)->fd == serv_fd) {
-        int cli_fd = accept(serv_fd, (struct sockaddr *)&cli_addr, &cli_len);
-        SASSERT(cli_fd > 0);
-        addfd_to_epoll(&events[i], cli_fd, &cli_addr);
-      } else {
-        if (epoll_type == EPOLLET) {
-          process_in_et_loop(&events[i]);
-        } else {
-          process_in_lt(&events[i]);
-        }
-      }
-    } else {
-      SASSERT("other events ...");
-    }
-  }
-
 }
 
 int main(int argc, char **argv) {
   LOG_INFO("starting process ...");
-  int number, reuse = 1, r = 0;
+  if (epoll_type == EPOLLET) {
+    handle_cli_event = process_in_et_loop;
+  } else {
+    handle_cli_event = process_in_lt;
+  }
+
+  int reuse = 1;
   struct sockaddr_in serv_addr;
   memset(&serv_addr, 0, sizeof(struct sockaddr_in));
   serv_addr.sin_family = AF_INET;
   serv_addr.sin_addr.s_addr = inet_addr(LISTEN_ADDR);
   serv_addr.sin_port = htons(LISTEN_PORT);
 
-  serv_fd = socket(PF_INET, SOCK_STREAM, 0);
-  SASSERT(serv_fd > 0);
-  r = setsockopt(serv_fd, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));
-  SASSERT(r == 0);
-  bind(serv_fd, (struct sockaddr *) &serv_addr, sizeof(struct sockaddr_in));
-  listen(serv_fd, CONN_MAX);
+  SASSERT((serv_fd = socket(PF_INET, SOCK_STREAM, 0)) > 0);
+  SASSERT(setsockopt(serv_fd, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse)) == 0);
+  SASSERT(setsockopt(serv_fd, SOL_SOCKET, SO_REUSEPORT, &reuse, sizeof(reuse)) == 0);
+  SASSERT(bind(serv_fd, (struct sockaddr *) &serv_addr, sizeof(serv_addr)) == 0);
+  SASSERT(listen(serv_fd, CONN_MAX) == 0);
 
   struct epoll_event events[MAX_EVENTS];
-  epoll_fd = epoll_create1(0);
-  SASSERT(epoll_fd > 0);
+  SASSERT((epoll_fd = epoll_create1(0)) > 0);
 
   struct epoll_event serv_event;
   addfd_to_epoll(&serv_event, serv_fd, &serv_addr);
   addr_info_t *serv_info = (addr_info_t *)serv_event.data.ptr;
 
   LOG_INFO("listening on %s:%d", serv_info->ip, serv_info->port);
+  int number;
+  struct sockaddr_in cli_addr;
+  socklen_t cli_len = sizeof(struct sockaddr_in);
   while (1) {
-    number = epoll_wait(epoll_fd, events, MAX_EVENTS, -1);
-    SASSERT(number > 0);
-    process(events, number);
+    SASSERT((number = epoll_wait(epoll_fd, events, MAX_EVENTS, -1)) > 0);
+    for (int i = 0; i < number; ++i) {
+      if (events[i].events & EPOLLIN) {
+        if (((addr_info_t *)events[i].data.ptr)->fd == serv_fd) {
+          int cli_fd = accept(serv_fd, (struct sockaddr *)&cli_addr, &cli_len);
+          SASSERT(cli_fd > 0);
+          addfd_to_epoll(&events[i], cli_fd, &cli_addr);
+          addr_info_t *cli_info = (addr_info_t *)events[i].data.ptr;
+          LOG_INFO("new client connection: %s:%d", cli_info->ip, cli_info->port);
+        } else {
+          handle_cli_event(&events[i]);
+        }
+      } else {
+        SASSERT("other events ...");
+      }
+    }
   }
 
   LOG_INFO("process exit ...");
 
   return 0;
 }
+

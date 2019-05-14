@@ -24,7 +24,9 @@
 #define SASSERT(exp, ...) \
   do { if (!(exp)) { LOG_FATAL("%s", strerror(errno)); assert(0); } } while (0)
 
-#define LOG_SERROR do { LOG_ERROR("%s", strerror(errno)); } while (0)
+#define LOG_SERROR do { \
+  LOG_ERROR("%s", strerror(errno)); \
+  } while (0)
 
 #define ERR_STR strerror(errno)
 
