@@ -42,6 +42,7 @@ static void* threadpool_run_task(void *data) {
     if (task == NULL) {
       pthread_cond_wait(&task_cond, &task_lock);
       if (task_state == STOPPED) {
+        pthread_cond_signal(&task_cond);
         pthread_mutex_unlock(&task_lock);
         break;
       }
@@ -58,6 +59,8 @@ static void* threadpool_run_task(void *data) {
     NEW_TASK;
   }
   free(runner);
+  --threadpool_size;
+  LOG_INFO("threadpool size: %d", threadpool_size);
   pthread_exit(NULL);
 }
 
@@ -92,3 +95,11 @@ void threadpool_post_task(threadpool_func func, void *data) {
   pthread_cond_signal(&task_cond);
   pthread_mutex_unlock(&task_lock);
 }
+
+void threadpool_stop() {
+  pthread_mutex_lock(&task_lock);
+  task_state = STOPPED;
+  pthread_cond_signal(&task_cond);
+  pthread_mutex_unlock(&task_lock);
+}
+

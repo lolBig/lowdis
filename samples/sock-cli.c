@@ -45,19 +45,19 @@ void process(void *data) {
       if (events[i].events & EPOLLIN) {
         int r = read(events[i].data.fd, buffer, sizeof(buffer));
         if (r == 0) {
-          LOG_INFO("server closed");
-          send(sync_fd, "", 1, 0);
-          close(sock);
+          LOG_ERROR("server closed");
+          SASSERT(close(sock) == 0);
+          exit(0);
           return;
         } else if (r < 0) {
           int err = errno;
-          LOG_ERROR("recv error: %ld %d %d %s", sizeof(buffer), err, strerror(err));
-          if (err == EAGAIN || err == EWOULDBLOCK) {
+          if (err == EAGAIN || err == EINTR) {
             continue;
           }
-          LOG_ERROR("unhandled error");
-          send(sync_fd, "", 1, 0);
-          close(sock);
+          LOG_ERROR("server error");
+          LOG_ERROR("code: %d, message: %s", err, strerror(err));
+          SASSERT(close(sock) == 0);
+          exit(0);
           return;
         }
         if (new_fd == sync_fd) {
@@ -76,22 +76,22 @@ void process(void *data) {
 
 int main() {
   LOG_INFO("starting ...");
+
   SASSERT((epoll_fd = epoll_create1(0)) > 0);
   SASSERT((sync_fd = eventfd(0, EFD_NONBLOCK)) > 0);
   addfd_to_epoll(epoll_fd, sync_fd);
 
   threadpool_init(4);
   threadpool_post_task(process, NULL);
-  while (1) {
-    scanf("%s", input_buf);
-    if (strcmp(input_buf, "") == 0) {
-      break;
-    }
+
+  while (scanf("%s", input_buf) != EOF) {
     input_buf_size = strlen(input_buf);
     SASSERT(write(sync_fd, &input_buf_size, 8) == 8);
   }
+
   SASSERT(close(sync_fd) == 0);
   SASSERT(close(epoll_fd) == 0);
+  LOG_INFO("bye");
 
   return 0;
 }
