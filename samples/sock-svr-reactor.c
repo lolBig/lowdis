@@ -64,7 +64,7 @@ static void process_in_lt(struct epoll_event *event) {
   memset(buffer, 0, BUF_SIZE);
   r = read(cli_info->fd, buffer, BUF_SIZE);
   if (r > 0) {
-    LOG_INFO("client message: %s, %d", buffer, r);
+    LOG_INFO("client message: %s, % dbytes", buffer, r);
     buffer[r] = '\0';
     SASSERT((r = write(cli_info->fd, buffer, r)) > 0);
     LOG_INFO("response %d bytes", r);
@@ -97,9 +97,10 @@ static void process_in_et(struct epoll_event *event) {
       removefd_from_epoll(event);
       break;
     } else {
-      LOG_INFO("client message: %s, %d", buffer, r);
       buffer[r] = '\0';
-      SASSERT(write(cli_info->fd, buffer, r) == r);
+      LOG_INFO("client message: %s, %d bytes", buffer, r);
+      SASSERT((r = write(cli_info->fd, buffer, r)) > 0);
+      LOG_INFO("response %d bytes", r);
     }
   }
 }
