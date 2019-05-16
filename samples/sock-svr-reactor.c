@@ -4,7 +4,7 @@
 #include "common.h"
 
 #define MAX_EVENTS 10
-#define BUF_SIZE 5
+#define BUF_SIZE 1024 * 1024
 #define LISTEN_PORT 12306
 #define LISTEN_ADDR "127.0.0.1"
 #define CONN_MAX 5
@@ -64,10 +64,9 @@ static void process_in_lt(struct epoll_event *event) {
   memset(buffer, 0, BUF_SIZE);
   r = read(cli_info->fd, buffer, BUF_SIZE);
   if (r > 0) {
-    LOG_INFO("client message: %s, % dbytes", buffer, r);
     buffer[r] = '\0';
-    SASSERT((r = write(cli_info->fd, buffer, r)) > 0);
-    LOG_INFO("response %d bytes", r);
+    SASSERT(write(cli_info->fd, buffer, r) == r);
+    LOG_INFO("lt response %d bytes", r);
   } else {
     if (r < 0) {
       int err = errno;
@@ -98,9 +97,8 @@ static void process_in_et(struct epoll_event *event) {
       break;
     } else {
       buffer[r] = '\0';
-      LOG_INFO("client message: %s, %d bytes", buffer, r);
-      SASSERT((r = write(cli_info->fd, buffer, r)) > 0);
-      LOG_INFO("response %d bytes", r);
+      SASSERT(write(cli_info->fd, buffer, r) == r);
+      LOG_INFO("et response %d bytes", r);
     }
   }
 }
@@ -182,6 +180,7 @@ int main(int argc, char **argv) {
         if (((addr_info_t *)events[i].data.ptr)->fd == serv_fd) {
           handle_connection(&events[i], &cli_addr, &cli_len);
         } else {
+          sleep(5);
           handle_cli_event(&events[i]);
         }
       } else {
