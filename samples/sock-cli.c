@@ -9,10 +9,12 @@
 #define SCANF_BUF_SISE 1024
 #define SVR_PORT 12306
 #define SVR_ADDR "127.0.0.1"
+#define FILE_BUF_LEN 1024 * 1024
 
 static int epoll_fd;
 static int cli_fd;
 static int sync_fd;
+static int sync_buf_size = sizeof(uint64_t);
 static bool is_connected = false;
 static char scanf_buf[SCANF_BUF_SISE];
 static uint64_t scanf_buf_size;
@@ -63,7 +65,7 @@ static void handle_poll_in(int fd) {
   LOG_INFO("poll in event");
   if (fd == sync_fd) {
     LOG_INFO("start send user input");
-    SASSERT(read(sync_fd, &scanf_buf_size, 8) == 8);
+    SASSERT(read(sync_fd, &scanf_buf_size, sync_buf_size) == sync_buf_size);
     send_bytes(cli_fd);
     return;
   }
@@ -191,7 +193,7 @@ int main() {
     }
     file_cursor = file_buf;
     scanf_buf_size = strlen(scanf_buf);
-    SASSERT(write(sync_fd, &scanf_buf_size, 8) == 8);
+    SASSERT(write(sync_fd, &scanf_buf_size, sync_buf_size) == sync_buf_size);
   }
 
   SASSERT(close(sync_fd) == 0);
@@ -200,3 +202,4 @@ int main() {
 
   return 0;
 }
+
